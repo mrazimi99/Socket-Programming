@@ -11,6 +11,8 @@
 #include <stdlib.h>
 #include <fcntl.h>
 
+#define MAX_LINE 1024
+
 int download_file(int server_fd, char* file_name);
 int upload_file(int server_fd, char* file_name);
 
@@ -48,7 +50,7 @@ int main(int argc, char const *argv[])
 
 	int received_data = 0;
 	int server_is_alive = 0;
-	char heart_beat_message[100];
+	char heart_beat_message[128];
 	struct timeval past, now;
 	gettimeofday(&now, NULL);
 	past = now;
@@ -62,23 +64,25 @@ int main(int argc, char const *argv[])
 		struct timeval timeout = {0, 0};
 		select(heartbeat_fd + 1, &heartbeat_fd_set, NULL, NULL, &timeout);
 
-		if (FD_ISSET(heartbeat_fd, &heartbeat_fd_set) && (received_data = recvfrom(heartbeat_fd, heart_beat_message, 100, 0, NULL, NULL)) < 0)
+		if (FD_ISSET(heartbeat_fd, &heartbeat_fd_set) && (received_data = recvfrom(heartbeat_fd, heart_beat_message, 128, 0, NULL, NULL)) < 0)
 		{
-			printf("ok\n");
 			server_is_alive = 0;
 			break;
 		}
 		else if (received_data > 0)
 		{
+			char* message = "Server is up with port: ";
 			heart_beat_message[received_data] = '\0';
-			printf("Server is up with port: %s\n", heart_beat_message);
+			write(1, message, strlen(message));
+			write(1, heart_beat_message, strlen(heart_beat_message));
+			write(1, "\n", strlen("\n"));
 			server_is_alive = 1;
 			break;
 		}
 
 		gettimeofday(&now, NULL);
 		if (now.tv_sec > past.tv_sec + 1)
-		{printf("o213k\n");
+		{
 			server_is_alive = 0;
 			break;
 		}
@@ -152,7 +156,7 @@ int main(int argc, char const *argv[])
 
 int download_file(int server_fd, char* command)
 {
-	char buffer[1024];
+	char buffer[MAX_LINE];
 	send(server_fd, command, strlen(command), 0);
 	int message_length;
 	if((message_length = read(server_fd, buffer, sizeof(buffer))) <= 0)
@@ -168,11 +172,9 @@ int download_file(int server_fd, char* command)
 		return 0;
 	}
 
-	printf("%d\n", message_length);
-
 	int file_fd;
 	char* file_name = command + 9;
-	if ((file_fd = open(file_name, O_RDWR | O_CREAT, S_IRWXU)) < 0)
+	if ((file_fd = open(file_name, O_RDWR | O_CREAT | O_TRUNC, S_IRWXU)) < 0)
 	{
 		char* error_message = "Create error!\n";
 		write(2, error_message, strlen(error_message));
@@ -180,8 +182,19 @@ int download_file(int server_fd, char* command)
 	}
 
 	int read_length;
-	while((read_length = read(server_fd, buffer, sizeof(buffer))) > 0)
+	fd_set read_fd;
+	struct timeval timeout = {0, 100};
+	FD_ZERO(&read_fd);
+	FD_SET(server_fd, &read_fd);
+	select(server_fd + 1, &read_fd, NULL, NULL, &timeout);
+
+	while(FD_ISSET(server_fd, &read_fd) && (read_length = read(server_fd, buffer, sizeof(buffer))) > 0)
 	{
+		struct timeval timeout = {0, 100};
+		FD_ZERO(&read_fd);
+		FD_SET(server_fd, &read_fd);
+		select(server_fd + 1, &read_fd, NULL, NULL, &timeout);
+
 		if (write(file_fd, buffer, read_length) != read_length)
 		{
 			char* error_message = "Write error!\n";
@@ -213,7 +226,7 @@ int upload_file(int server_fd, char* command)
 		return 0;
 	}
 
-	char buffer[1024];
+	char buffer[MAX_LINE];
 	send(server_fd, command, strlen(command), 0);
 	int message_length;
 

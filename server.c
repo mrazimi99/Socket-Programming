@@ -12,6 +12,7 @@
 #include <signal.h>
 
 #define PORT "8080"
+#define MAX_LINE 1024
 
 int beat = 0;
 
@@ -76,7 +77,7 @@ int main(int argc, char const *argv[])
 	char* files[1000] = {NULL};
 	int files_num = 0;
 
-	char buffer[1024] = {0};
+	char buffer[MAX_LINE] = {0};
 	fd_set read_fd;
 
 	// signal(SIGALRM, signal_handler);
@@ -115,7 +116,8 @@ int main(int argc, char const *argv[])
 					if (sockets[i] == 0)
 					{
 						sockets[i] = new_socket;
-						printf("New socket added\n");
+						char* message = "New socket added\n";
+						write(1, message, strlen(message));
 						break;
 					}
 				}
@@ -125,17 +127,15 @@ int main(int argc, char const *argv[])
 		{
 			for (int i = 1; i < num; i++)
 			{
-				// printf("%d\t%d\n", i, num);
 				int curent_client = sockets[i];
 				if (FD_ISSET(curent_client, &read_fd))
 				{
 					int read_size = 0;
-					if ((read_size = read(curent_client, buffer, 1024)) > 0)
+					if ((read_size = read(curent_client, buffer, MAX_LINE)) > 0)
 					{
 						buffer[read_size] = '\0';
 						if (memmem(buffer, read_size, "download", 8) == buffer)
 						{
-							printf("ok1\n");
 							int found = 0;
 							for (int j = 0; j < files_num; j++)
 							{
@@ -144,7 +144,6 @@ int main(int argc, char const *argv[])
 									send(curent_client, "1", 1, 0);
 									send_file(curent_client, files[j]);
 									found = 1;
-									printf("ok2\n");
 									break;
 								}
 							}
@@ -152,7 +151,7 @@ int main(int argc, char const *argv[])
 							if (!found)
 								send(curent_client, "0", 1, 0);
 						}
-						else if (memmem(buffer, 1024, "upload", 6) == buffer)
+						else if (memmem(buffer, MAX_LINE, "upload", 6) == buffer)
 						{
 							int duplicate = 0;
 
@@ -166,26 +165,18 @@ int main(int argc, char const *argv[])
 								}
 							}
 
-							if (duplicate)
-								break;
-
-							files[files_num] = (char*)malloc((read_size - 7 + 1) * sizeof(char));
-							strcpy(files[files_num], buffer + 7);
-							send(curent_client, "1", 1, 0);
-
-							if (FD_ISSET(curent_client, &read_fd))
-								receive_file(curent_client, files[files_num++]);
-							else
+							if (!duplicate)
 							{
-								char* error_message = "Upload receive error!\n";
-								write(2, error_message, strlen(error_message));
-								break;
+								files[files_num] = (char*)malloc((read_size - 7 + 1) * sizeof(char));
+								strcpy(files[files_num], buffer + 7);
+								send(curent_client, "1", 1, 0);
+								receive_file(curent_client, files[files_num++]);
 							}
 						}
 						else
 						{
 							printf("%s\n", buffer);
-							send(curent_client, "-1", 1, 0);
+							send(curent_client, "0", 1, 0);
 						}
 					}
 					else
@@ -213,7 +204,7 @@ int main(int argc, char const *argv[])
 
 int send_file(int destination_fd, char* file_name)
 {
-	char buffer[1024];
+	char buffer[MAX_LINE];
 	int file_fd;
 	if ((file_fd = open(file_name, O_RDONLY)) < 0)
 	{
@@ -247,9 +238,9 @@ int send_file(int destination_fd, char* file_name)
 
 int receive_file(int source_fd, char* file_name)
 {
-	char buffer[1024];
+	char buffer[128];
 	int file_fd;
-	if ((file_fd = open(file_name, O_RDWR | O_CREAT, S_IRWXU)) < 0)
+	if ((file_fd = open(file_name, O_RDWR | O_CREAT | O_TRUNC, S_IRWXU)) < 0)
 	{
 		char* error_message = "Create error!\n";
 		write(2, error_message, strlen(error_message));
@@ -257,8 +248,20 @@ int receive_file(int source_fd, char* file_name)
 	}
 
 	int read_length;
-	while((read_length = read(source_fd, buffer, sizeof(buffer))) > 0)
+	fd_set read_fd;
+	struct timeval timeout = {0, 100};
+	FD_ZERO(&read_fd);
+	FD_SET(source_fd, &read_fd);
+	select(source_fd + 1, &read_fd, NULL, NULL, &timeout);
+
+	while(FD_ISSET(source_fd, &read_fd) && (read_length = read(source_fd, buffer, sizeof(buffer))) > 0)
 	{
+		
+		struct timeval timeout = {0, 100};
+		FD_ZERO(&read_fd);
+		FD_SET(source_fd, &read_fd);
+		select(source_fd + 1, &read_fd, NULL, NULL, &timeout);
+
 		if (write(file_fd, buffer, read_length) != read_length)
 		{
 			char* error_message = "Write error!\n";
@@ -305,4 +308,5 @@ void send_heart_beat(int udp_port)
 	write(1, beat_sound, strlen(beat_sound));
 	sendto(server_socket, PORT, strlen(PORT), MSG_DONTWAIT, (const struct sockaddr *)&broadcast_address,
 			sizeof broadcast_address);
+	close(server_socket);
 }
