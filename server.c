@@ -13,7 +13,7 @@
 #include <errno.h>
 
 #define PORT "8080"
-#define MAX_LINE 1024
+#define MAX_LINE 512
 
 int beat = 0;
 
@@ -31,24 +31,9 @@ int main(int argc, char const *argv[])
 		return 1;
 	}
 
-	// // UDP Server
+	// UDP Server
 	int udp_fd, udp_port;
 	udp_port = atoi(argv[1]);
-	// udp_fd = socket(PF_INET, SOCK_DGRAM, 0);
-	// struct sockaddr_in udp_address;
-	// udp_address.sin_family = PF_INET;
-	// udp_address.sin_addr.s_addr = htonl(INADDR_BROADCAST);
-	// udp_address.sin_port = htons(udp_port);
-	// int udp_address_length = sizeof(udp_address);
-	// int broadcast = 1;
-
-	// setsockopt(udp_fd, SOL_SOCKET, SO_BROADCAST, &broadcast, sizeof(broadcast));
-
-	// // if (bind(udp_fd, (struct sockaddr*)&udp_address, udp_address_length) < 0)
-	// // {
-	// // 	perror("bind 2\n");
-	// // 	return 1;
-	// // }
 
 	// TCP Server
 	int tcp_port = atoi(PORT);
@@ -75,18 +60,12 @@ int main(int argc, char const *argv[])
 	sockets[0] = server_fd;
 	int num = 1;
 
-	char* files[1000] = {NULL};
-	int files_num = 0;
-
 	char buffer[MAX_LINE] = {0};
 	fd_set read_fd;
 
-	// signal(SIGALRM, signal_handler);
-	// alarm(1);
+	signal(SIGALRM, signal_handler);
+	alarm(1);
 
-	struct timeval past, now;
-	gettimeofday(&now, NULL);
-	past = now;
 	// Forever
 	while (1)
 	{
@@ -104,17 +83,17 @@ int main(int argc, char const *argv[])
 				last_node = sockets[i];
 		}
 
-		// if (beat)
-		// {
-		// 	alarm(1);
-		// 	send_heart_beat(udp_port);
-		// 	beat = 0;
-		// }
+		if (beat)
+		{
+			send_heart_beat(udp_port);
+			beat = 0;
+			alarm(1);
+		}
 
 		int new_event = select(last_node + 1, &read_fd, NULL, NULL, &timeout);
 
-		// if (errno == EINTR)
-		// 	continue;
+		if (new_event < 0 && errno == EINTR)
+			continue;
 
 		if (FD_ISSET(server_fd, &read_fd))		// New connection
 		{
@@ -148,42 +127,22 @@ int main(int argc, char const *argv[])
 						buffer[read_size] = '\0';
 						if (memmem(buffer, read_size, "download", 8) == buffer)
 						{
-							int found = 0;
-							for (int j = 0; j < files_num; j++)
-							{
-								if (!strcmp(files[j], buffer + 9))
-								{
-									send(curent_client, "1", 1, 0);
-									send_file(curent_client, files[j]);
-									found = 1;
-									break;
-								}
-							}
+							char* file_name = buffer + 9;
+							int file_fd;
 
-							if (!found)
+							if ((file_fd = open(file_name, O_RDONLY)) > 0)
+							{
+								close(file_fd);
+								send(curent_client, "1", 1, 0);
+								send_file(curent_client, file_name);
+							}
+							else
 								send(curent_client, "0", 1, 0);
 						}
 						else if (memmem(buffer, MAX_LINE, "upload", 6) == buffer)
 						{
-							int duplicate = 0;
-
-							for (int j = 0; j < files_num; j++)
-							{
-								if (!strcmp(files[j], buffer + 7))
-								{
-									send(curent_client, "0", 1, 0);
-									duplicate = 1;
-									break;
-								}
-							}
-
-							if (!duplicate)
-							{
-								files[files_num] = (char*)malloc((read_size - 7 + 1) * sizeof(char));
-								strcpy(files[files_num], buffer + 7);
-								send(curent_client, "1", 1, 0);
-								receive_file(curent_client, files[files_num++]);
-							}
+							send(curent_client, "1", 1, 0);
+							receive_file(curent_client, buffer + 7);
 						}
 						else
 						{
@@ -201,12 +160,12 @@ int main(int argc, char const *argv[])
 				}
 			}
 		}
-		gettimeofday(&now, NULL);
-		if (now.tv_sec >= past.tv_sec + 1)
-		{
-			past = now;
-			send_heart_beat(udp_port);
-		}
+		// gettimeofday(&now, NULL);
+		// if (now.tv_sec >= past.tv_sec + 1)
+		// {
+		// 	past = now;
+		// 	send_heart_beat(udp_port);
+		// }
 	}
 }
 
@@ -214,6 +173,7 @@ int send_file(int destination_fd, char* file_name)
 {
 	char buffer[MAX_LINE];
 	int file_fd;
+
 	if ((file_fd = open(file_name, O_RDONLY)) < 0)
 	{
 		char* error_message = "Open error!\n";

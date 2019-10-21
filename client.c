@@ -13,7 +13,7 @@
 #include <errno.h>
 #include <signal.h>
 
-#define MAX_LINE 1024
+#define MAX_LINE 512
 
 int can_send_broadcast = 0;
 
@@ -94,7 +94,7 @@ int main(int argc, char const *argv[])
 		select(heartbeat_fd + 1, &heartbeat_fd_set, NULL, NULL, &timeout);
 
 		if (FD_ISSET(heartbeat_fd, &heartbeat_fd_set) && (received_data = recvfrom(heartbeat_fd, heart_beat_message, 128, 0, NULL, NULL)) < 0)
-		{
+		{printf("1\n");
 			server_is_alive = 0;
 			break;
 		}
@@ -111,7 +111,7 @@ int main(int argc, char const *argv[])
 
 		gettimeofday(&now, NULL);
 		if (now.tv_sec > past.tv_sec + 1)
-		{
+		{printf("2\n");
 			server_is_alive = 0;
 			break;
 		}
@@ -175,11 +175,12 @@ int main(int argc, char const *argv[])
 	fd_set read_fd;
 	int find_with_broadcast = 0;
 
-	// signal(SIGALRM, signal_handler);
-	// alarm(1);
+	signal(SIGALRM, signal_handler);
+	alarm(1);
+
 	// struct timeval past, now;
-	gettimeofday(&now, NULL);
-	past = now;
+	// gettimeofday(&now, NULL);
+	// past = now;
 
 	// Forever
 	while (1)
@@ -193,19 +194,19 @@ int main(int argc, char const *argv[])
 		FD_SET(broadcast_fd, &read_fd);
 		FD_SET(client_connection, &read_fd);
 		int maxfd = broadcast_fd > client_connection ? broadcast_fd : client_connection;
-		select(maxfd + 1, &read_fd, NULL, NULL, &timeout);
+		int new_event = select(maxfd + 1, &read_fd, NULL, NULL, &timeout);
 
-		// if (can_send_broadcast && find_with_broadcast)
-		// {
-		// 	alarm(1);
-		// 	can_send_broadcast = 0;
-		// 	char* sending_message = "Sending broadcast request\n";
-		// 	write(1, sending_message, strlen(sending_message));
-		// 	send_broadcast(client_broadcast_port, broadcast_message);
-		// }
+		if (can_send_broadcast && find_with_broadcast)
+		{
+			can_send_broadcast = 0;
+			char* sending_message = "Sending broadcast request\n";
+			write(1, sending_message, strlen(sending_message));
+			send_broadcast(client_broadcast_port, broadcast_message);
+			alarm(1);
+		}
 
-		// if (errno == EINTR)
-		// 	continue;
+		if (new_event < 0 && errno == EINTR)
+			continue;
 
 		int data_is_ready = FD_ISSET(0, &read_fd);
 
@@ -257,14 +258,14 @@ int main(int argc, char const *argv[])
 			}
 		}
 
-		gettimeofday(&now, NULL);
-		if (find_with_broadcast && now.tv_sec >= past.tv_sec + 1)
-		{
-			past = now;
-			char* sending_message = "Sending broadcast request\n";
-			// write(1, sending_message, strlen(sending_message));
-			send_broadcast(client_broadcast_port, broadcast_message);
-		}
+		// gettimeofday(&now, NULL);
+		// if (find_with_broadcast && now.tv_sec >= past.tv_sec + 1)
+		// {
+		// 	past = now;
+		// 	char* sending_message = "Sending broadcast request\n";
+		// 	// write(1, sending_message, strlen(sending_message));
+		// 	send_broadcast(client_broadcast_port, broadcast_message);
+		// }
 
 		if (FD_ISSET(broadcast_fd, &read_fd))
 		{
@@ -488,15 +489,6 @@ void receive_broadcast(int broadcast_fd, const char* my_port)
 				exit(EXIT_FAILURE);
 			}
 
-			// char command[100] = "upload ";
-			// for (int i = 0; i < strlen(file_name) ; i++)
-			// {
-			// 	command[i + 7] = file_name[i];
-			// }
-
-			// sleep(123);
-			// upload_file(new_connection, command);
-			// printf("%lu\n", strlen(file_name));
 			send_file(new_connection, file_name);
 			sleep(1);
 			close(new_connection);
@@ -524,7 +516,7 @@ void signal_handler(int sig)
 
 int send_file(int destination_fd, char* file_name)
 {
-	char buffer[128];
+	char buffer[1024];
 	int file_fd;
 	if ((file_fd = open(file_name, O_RDONLY)) < 0)
 	{
