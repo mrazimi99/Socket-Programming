@@ -133,7 +133,7 @@ int main(int argc, char const *argv[])
 		return 1;
 	}
 
-	if (listen(client_connection, 100) < 0)
+	if (listen(client_connection, 20) < 0)
 	{
 		perror("listen\n");
 		return 1;
@@ -188,7 +188,7 @@ int main(int argc, char const *argv[])
 		char command[100], broadcast_message[100];
 		int read_size;
 
-		struct timeval timeout = {0, 0};
+		struct timeval timeout = {0, 1000};
 		FD_ZERO(&read_fd);
 		FD_SET(0, &read_fd);
 		FD_SET(broadcast_fd, &read_fd);
@@ -273,16 +273,18 @@ int main(int argc, char const *argv[])
 			receive_broadcast(broadcast_fd, port);
 		}
 
-		if (FD_ISSET(client_connection, &read_fd))		// New connection
+		if (FD_ISSET(client_connection, &read_fd) && find_with_broadcast)		// New connection
 		{
 			int new_socket;
 			if ((new_socket = accept(client_connection, (struct sockaddr*)&client_address, (socklen_t*)&client_address_length)) < 0)
 				perror("Accept Failed!\n");
 			else
 			{
-				// download_file(new_socket, );
-				printf("connection\n");
+				struct sockaddr_in sin;
+				socklen_t len = sizeof(sin);
+
 				find_with_broadcast = 0;
+				send(new_socket, "1", 1, 0);
 				receive_file(new_socket, broadcast_message + strlen(argv[3]) + 1);
 				close(new_socket);
 			}
@@ -454,12 +456,12 @@ void receive_broadcast(int broadcast_fd, const char* my_port)
 
 		port[length] = '\0';
 		++file_name;
-		printf("%s\t%s\n", port, file_name);
 
 		int file_fd;
 		if ((file_fd = open(file_name, O_RDONLY)) > 0)
 		{
 			close(file_fd);
+
 			int new_connection = socket(PF_INET, SOCK_STREAM, 0);
 			struct sockaddr_in my_address, other_address;
 			my_address.sin_family = PF_INET;
@@ -486,11 +488,21 @@ void receive_broadcast(int broadcast_fd, const char* my_port)
 			{
 				char* error_message = "Could not connect to 123!\n";
 				write(1, error_message, strlen(error_message));
-				exit(EXIT_FAILURE);
+				return;
 			}
 
+			fd_set read_fd;
+			FD_ZERO(&read_fd);
+			FD_SET(new_connection, &read_fd);
+			struct timeval timeout = {0, 1000};
+			select(new_connection + 1, &read_fd, NULL, NULL, &timeout);
+			char buffer[10];
+
+			if (FD_ISSET(new_connection, &read_fd))
+				read(new_connection, buffer, 10);
+			else
+				return;
 			send_file(new_connection, file_name);
-			sleep(1);
 			close(new_connection);
 		}
 	}
@@ -558,7 +570,7 @@ int receive_file(int source_fd, char* file_name)
 		write(2, error_message, strlen(error_message));
 		return 0;
 	}
-printf("%s\n", file_name);
+
 	int read_length;
 	fd_set read_fd;
 	struct timeval timeout = {0, 100};
