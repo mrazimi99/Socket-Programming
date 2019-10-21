@@ -10,6 +10,7 @@
 #include <stdlib.h>
 #include <fcntl.h>
 #include <signal.h>
+#include <errno.h>
 
 #define PORT "8080"
 #define MAX_LINE 1024
@@ -82,10 +83,11 @@ int main(int argc, char const *argv[])
 
 	// signal(SIGALRM, signal_handler);
 	// alarm(1);
+
 	struct timeval past, now;
 	gettimeofday(&now, NULL);
 	past = now;
-
+	// Forever
 	while (1)
 	{
 		struct timeval timeout = {0, 0};
@@ -102,7 +104,17 @@ int main(int argc, char const *argv[])
 				last_node = sockets[i];
 		}
 
+		// if (beat)
+		// {
+		// 	alarm(1);
+		// 	send_heart_beat(udp_port);
+		// 	beat = 0;
+		// }
+
 		int new_event = select(last_node + 1, &read_fd, NULL, NULL, &timeout);
+
+		// if (errno == EINTR)
+		// 	continue;
 
 		if (FD_ISSET(server_fd, &read_fd))		// New connection
 		{
@@ -189,15 +201,11 @@ int main(int argc, char const *argv[])
 				}
 			}
 		}
-
-		// Broadcast
 		gettimeofday(&now, NULL);
-		if (now.tv_sec == past.tv_sec + 1)
+		if (now.tv_sec >= past.tv_sec + 1)
 		{
-			// alarm(1);
 			past = now;
 			send_heart_beat(udp_port);
-			// beat = 0;
 		}
 	}
 }
@@ -304,7 +312,7 @@ void send_heart_beat(int udp_port)
 	broadcast_address.sin_family = PF_INET;
 	broadcast_address.sin_addr.s_addr = htonl(INADDR_BROADCAST); 
 	broadcast_address.sin_port = htons(udp_port);
-	char* beat_sound = "mig mig\n";
+	char* beat_sound = "mig mig!\n";
 	write(1, beat_sound, strlen(beat_sound));
 	sendto(server_socket, PORT, strlen(PORT), MSG_DONTWAIT, (const struct sockaddr *)&broadcast_address,
 			sizeof broadcast_address);
