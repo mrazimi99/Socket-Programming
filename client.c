@@ -393,8 +393,6 @@ void receive_broadcast(int broadcast_fd, const char* my_port)
 			if (strlen(buffer) != 1 || buffer[0] != '1')
 			{
 				logger("Someone else sent the file!\n", 1);
-				logger(buffer, 1);
-				logger("\n", 1);
 				close(new_connection);
 				return;
 			}
