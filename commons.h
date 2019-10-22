@@ -61,7 +61,7 @@ int receive_file(int source_fd, char* file_name)
 		return 0;
 	}
 
-	int read_length;
+	int read_length = 0;
 	fd_set read_fd;
 	struct timeval timeout = {1, 0};
 	setsockopt(source_fd, SOL_SOCKET, SO_RCVTIMEO, (const char*)&timeout, sizeof timeout);

@@ -253,7 +253,7 @@ int download_file(int server_fd, char* command)
 		return -1;
 	}
 
-	int read_length;
+	int read_length = 0;
 	fd_set read_fd;
 	struct timeval timeout = {1, 0};
 	setsockopt(server_fd, SOL_SOCKET, SO_RCVTIMEO, (const char*)&timeout, sizeof timeout);
@@ -384,19 +384,17 @@ void receive_broadcast(int broadcast_fd, const char* my_port)
 			if (connect(new_connection, (struct sockaddr*)&other_address, other_address_length) < 0)
 				die_with_error("Could not connect to client!\n");
 
-			fd_set read_fd;
-			FD_ZERO(&read_fd);
-			FD_SET(new_connection, &read_fd);
-			struct timeval timeout = {0, 1000};
-			select(new_connection + 1, &read_fd, NULL, NULL, &timeout);
 			char buffer[10];
-			int data_ready = 0;
-			if ((data_ready = FD_ISSET(new_connection, &read_fd)))
-				read(new_connection, buffer, 10);
+			struct timeval timeout = {1, 0};
+			setsockopt(new_connection, SOL_SOCKET, SO_RCVTIMEO, (const char*)&timeout, sizeof timeout);
+				int nbytes = read(new_connection, buffer, 10);
+				buffer[nbytes] = '\0';
 
-			if (!data_ready || strlen(buffer) != 1 || buffer[0] != '1')
+			if (strlen(buffer) != 1 || buffer[0] != '1')
 			{
 				logger("Someone else sent the file!\n", 1);
+				logger(buffer, 1);
+				logger("\n", 1);
 				close(new_connection);
 				return;
 			}
