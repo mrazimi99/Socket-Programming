@@ -5,7 +5,6 @@
 int beat = 0;
 
 void signal_handler(int sig);
-void send_heart_beat(int udp_port);
 
 int main(int argc, char const *argv[])
 {
@@ -60,7 +59,8 @@ int main(int argc, char const *argv[])
 
 		if (beat)
 		{
-			send_broadcast(udp_port, "mig mig!");
+			send_broadcast(udp_port, PORT);
+			logger("mig mig!\n", 1);
 			beat = 0;
 			alarm(1);
 		}
