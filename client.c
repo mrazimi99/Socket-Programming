@@ -1,39 +1,16 @@
-#define _GNU_SOURCE
-
-#include <stdio.h>
-#include <sys/socket.h>
-#include <sys/types.h>
-#include <arpa/inet.h>
-#include <unistd.h>
-#include <sys/select.h>
-#include <sys/time.h>
-#include <string.h>
-#include <stdlib.h>
-#include <fcntl.h>
-#include <errno.h>
-#include <signal.h>
-
-#define MAX_LINE 512
+#include "commons.h"
 
 int can_send_broadcast = 0;
 
 int download_file(int server_fd, char* file_name);
 int upload_file(int server_fd, char* file_name);
-void send_broadcast(int udp_port, char* message);
 void receive_broadcast(int broadcast_fd, const char* my_port);
 void signal_handler(int sig);
-
-int send_file(int destination_fd, char* file_name);
-int receive_file(int source_fd, char* file_name);
 
 int main(int argc, char const *argv[])
 {
 	if (argc != 4)
-	{
-		char* error_message = "Enter 3 needed ports.\n";
-		write(2, error_message, strlen(error_message));
-		return 1;
-	}
+		die_with_error("Enter 3 needed ports!\n");
 
 	int heart_beat_port = atoi(argv[1]);
 	int client_broadcast_port = atoi(argv[2]);
@@ -52,11 +29,7 @@ int main(int argc, char const *argv[])
 	setsockopt(broadcast_fd, SOL_SOCKET, SO_REUSEADDR, &broadcast, sizeof(broadcast));
 
 	if (bind(broadcast_fd, (struct sockaddr*)&broadcast_address, broadcast_address_length) < 0)
-	{
-		char* error_message = "Could not bind to broadcast port!\n";
-		write(1, error_message, strlen(error_message));
-		exit(EXIT_FAILURE);
-	}
+		die_with_error("Could not bind to broadcast port!\n");
 
 	// HeartBeat
 	int heartbeat_fd = socket(PF_INET, SOCK_DGRAM, 0);
@@ -71,11 +44,7 @@ int main(int argc, char const *argv[])
 	setsockopt(heartbeat_fd, SOL_SOCKET, SO_REUSEADDR, &broadcast, sizeof(broadcast));
 
 	if (bind(heartbeat_fd, (struct sockaddr*)&heartbeat_address, heartbeat_address_length) < 0)
-	{
-		char* error_message = "Could not bind to heartbeat port!\n";
-		write(1, error_message, strlen(error_message));
-		exit(EXIT_FAILURE);
-	}
+		die_with_error("Could not bind to heartbeat port!\n");
 
 	int received_data = 0;
 	int server_is_alive = 0;
@@ -85,6 +54,7 @@ int main(int argc, char const *argv[])
 	past = now;
 
 	fd_set heartbeat_fd_set;
+	logger("Waiting for server...\n", 1);
 
 	while (1)
 	{
@@ -94,30 +64,31 @@ int main(int argc, char const *argv[])
 		select(heartbeat_fd + 1, &heartbeat_fd_set, NULL, NULL, &timeout);
 
 		if (FD_ISSET(heartbeat_fd, &heartbeat_fd_set) && (received_data = recvfrom(heartbeat_fd, heart_beat_message, 128, 0, NULL, NULL)) < 0)
-		{printf("1\n");
+		{
 			server_is_alive = 0;
+			logger("Error occured on receiving server's heartbeat!\n", 2);
 			break;
 		}
 		else if (received_data > 0)
 		{
-			char* message = "Server is up with port: ";
-			heart_beat_message[received_data] = '\0';
-			write(1, message, strlen(message));
-			write(1, heart_beat_message, strlen(heart_beat_message));
-			write(1, "\n", strlen("\n"));
 			server_is_alive = 1;
+			heart_beat_message[received_data] = '\0';
+			logger("Server is up with port: ", 1);
+			logger(heart_beat_message, 1);
+			logger("\n", 1);
 			break;
 		}
 
 		gettimeofday(&now, NULL);
 		if (now.tv_sec > past.tv_sec + 1)
-		{printf("2\n");
+		{
 			server_is_alive = 0;
+			logger("There is no server in this network!\n", 2);
 			break;
 		}
 	}
 
-	// TCP BroadCast
+	// TCP peer to peer
 	int client_connection = socket(PF_INET, SOCK_STREAM, 0);
 	struct sockaddr_in client_address;
 	client_address.sin_family = PF_INET;
@@ -128,16 +99,10 @@ int main(int argc, char const *argv[])
 	setsockopt(client_connection, SOL_SOCKET, SO_REUSEPORT, &reuse, sizeof(reuse));
 
 	if (bind(client_connection, (struct sockaddr*)&client_address, client_address_length) < 0)
-	{
-		perror("bind 342\n");
-		return 1;
-	}
+		die_with_error("Could not bind to TCP peer to peer port!\n");
 
 	if (listen(client_connection, 20) < 0)
-	{
-		perror("listen\n");
-		return 1;
-	}
+		die_with_error("Could not perform listening!\n");
 
 	// Server
 	int server_connection = socket(PF_INET, SOCK_STREAM, 0);
@@ -158,18 +123,11 @@ int main(int argc, char const *argv[])
 		setsockopt(server_connection, SOL_SOCKET, SO_REUSEPORT, &reuse, sizeof(reuse));
 
 		if (bind(server_connection, (struct sockaddr*)&socket_address, address_length) < 0)
-		{
-			char* error_message = "Could not bind client!\n";
-			write(1, error_message, strlen(error_message));
-			exit(EXIT_FAILURE);
-		}
+			die_with_error("Could not bind to port for connectiong to server!\n");
+
 
 		if (connect(server_connection, (struct sockaddr*)&server_address, server_address_length) < 0)
-		{
-			char* error_message = "Could not connect to server!\n";
-			write(1, error_message, strlen(error_message));
-			exit(EXIT_FAILURE);
-		}
+			die_with_error("Could not connect to the server!\n");
 	}
 
 	fd_set read_fd;
@@ -178,12 +136,7 @@ int main(int argc, char const *argv[])
 	signal(SIGALRM, signal_handler);
 	alarm(1);
 
-	// struct timeval past, now;
-	// gettimeofday(&now, NULL);
-	// past = now;
-
-	// Forever
-	while (1)
+	while (1)		// Forever
 	{
 		char command[100], broadcast_message[100];
 		int read_size;
@@ -199,8 +152,7 @@ int main(int argc, char const *argv[])
 		if (can_send_broadcast && find_with_broadcast)
 		{
 			can_send_broadcast = 0;
-			char* sending_message = "Sending broadcast request\n";
-			write(1, sending_message, strlen(sending_message));
+			logger("Sending broadcast request\n", 1);
 			send_broadcast(client_broadcast_port, broadcast_message);
 			alarm(1);
 		}
@@ -211,10 +163,7 @@ int main(int argc, char const *argv[])
 		int data_is_ready = FD_ISSET(0, &read_fd);
 
 		if (data_is_ready && (read_size = read(0, command, 100)) < 0)
-		{
-			char* error_message = "Could not get command!\n";
-			write(1, error_message, strlen(error_message));
-		}
+			logger("Could not get the command!\n", 1);
 		else if (data_is_ready)
 		{
 			command[read_size - 1] = '\0';
@@ -223,7 +172,7 @@ int main(int argc, char const *argv[])
 			{
 				int download_result = 0;
 				if (server_is_alive && (download_result = download_file(server_connection, command)) < 0)
-					exit(EXIT_FAILURE);
+					logger("Download failed!\n", 1);
 				else if (download_result == 0)
 				{
 					find_with_broadcast = 1;
@@ -238,34 +187,18 @@ int main(int argc, char const *argv[])
 						broadcast_message[i] = command[i - strlen(argv[3]) + 8];
 					}
 				}
-				
 			}
 			else if (memmem(command, read_size, "upload", 6) == command)
 			{
 				if (server_is_alive)
 					upload_file(server_connection, command);
 				else
-				{
-					char* error_message = "There is no server!\n";
-					write(1, error_message, strlen(error_message));
-				}
+					logger("There is no server!\n", 1);
 				
 			}
 			else
-			{
-				char* message = "Invalid command. Try again!\n";
-				write(1, message, strlen(message));
-			}
+				logger("Invalid command. Try again:\n", 1);
 		}
-
-		// gettimeofday(&now, NULL);
-		// if (find_with_broadcast && now.tv_sec >= past.tv_sec + 1)
-		// {
-		// 	past = now;
-		// 	char* sending_message = "Sending broadcast request\n";
-		// 	// write(1, sending_message, strlen(sending_message));
-		// 	send_broadcast(client_broadcast_port, broadcast_message);
-		// }
 
 		if (FD_ISSET(broadcast_fd, &read_fd))
 		{
@@ -273,83 +206,80 @@ int main(int argc, char const *argv[])
 			receive_broadcast(broadcast_fd, port);
 		}
 
-		if (FD_ISSET(client_connection, &read_fd) && find_with_broadcast)		// New connection
+		if (FD_ISSET(client_connection, &read_fd))		// New connection
 		{
 			int new_socket;
 			if ((new_socket = accept(client_connection, (struct sockaddr*)&client_address, (socklen_t*)&client_address_length)) < 0)
-				perror("Accept Failed!\n");
-			else
+				logger("Could not accept sender's connection!\n", 2);
+			else if (find_with_broadcast)
 			{
-				struct sockaddr_in sin;
-				socklen_t len = sizeof(sin);
-
 				find_with_broadcast = 0;
 				send(new_socket, "1", 1, 0);
 				receive_file(new_socket, broadcast_message + strlen(argv[3]) + 1);
-				close(new_socket);
 			}
+			else
+				send(new_socket, "0", 1, 0);
+
+			close(new_socket);
 		}
 	}
 }
 
+// Functions
+
 int download_file(int server_fd, char* command)
 {
-	char buffer[MAX_LINE];
+	char buffer[MAX_LINE] = {0};
 	send(server_fd, command, strlen(command), 0);
 	int message_length;
+
 	if((message_length = read(server_fd, buffer, sizeof(buffer))) <= 0)
 	{
-		char* error_message = "Server is down!\n";
-		write(2, error_message, strlen(error_message));
-		return -1;
+		logger("Sender does not respond!\n", 2);
+		return 0;
 	}
 	else if (message_length == 1 && buffer[0] == '0')
 	{
-		char* error_message = "File does not exist!\n";
-		write(2, error_message, strlen(error_message));
+		logger("Server does not have the file!\n", 1);
 		return 0;
 	}
 
 	int file_fd;
 	char* file_name = command + 9;
+
 	if ((file_fd = open(file_name, O_RDWR | O_CREAT | O_TRUNC, S_IRWXU)) < 0)
 	{
-		char* error_message = "Create error!\n";
-		write(2, error_message, strlen(error_message));
+		logger("Could not create new file!\n", 2);
 		return -1;
 	}
 
 	int read_length;
 	fd_set read_fd;
-	struct timeval timeout = {0, 100};
-	FD_ZERO(&read_fd);
-	FD_SET(server_fd, &read_fd);
-	select(server_fd + 1, &read_fd, NULL, NULL, &timeout);
+	struct timeval timeout = {1, 0};
+	setsockopt(server_fd, SOL_SOCKET, SO_RCVTIMEO, (const char*)&timeout, sizeof timeout);
 
-	while(FD_ISSET(server_fd, &read_fd) && (read_length = read(server_fd, buffer, sizeof(buffer))) > 0)
+	logger("Downloading...\n", 1);
+
+	while((read_length = read(server_fd, buffer, sizeof(buffer))) > 0)
 	{
-		struct timeval timeout = {0, 100};
-		FD_ZERO(&read_fd);
-		FD_SET(server_fd, &read_fd);
-		select(server_fd + 1, &read_fd, NULL, NULL, &timeout);
 
 		if (write(file_fd, buffer, read_length) != read_length)
 		{
-			char* error_message = "Write error!\n";
-			write(2, error_message, strlen(error_message));
+			logger("Could not write to file!\n", 2);
 			return -1;
 		}
+
+		if (read_length < MAX_LINE)
+			break;
 	}
 
 	if(read_length < 0)
 	{
-    	char* error_message = "Read error!\n";
-		write(2, error_message, strlen(error_message));
+    	logger("File has not received properly!\n", 2);
 		return 0;
 	}
 
-	char* message = "File is downloaded!\n";
-	write(2, message, strlen(message));
+	logger("File is downloaded!\n", 1);
 	return 1;
 }
 
@@ -359,8 +289,7 @@ int upload_file(int server_fd, char* command)
 	char* file_name = command + 7;
 	if ((file_fd = open(file_name, O_RDONLY)) < 0)
 	{
-		char* error_message = "Open error!\n";
-		write(2, error_message, strlen(error_message));
+		logger("File does not exist!\n", 2);
 		return 0;
 	}
 
@@ -370,62 +299,36 @@ int upload_file(int server_fd, char* command)
 
 	if((message_length = read(server_fd, buffer, sizeof(buffer))) <= 0)
 	{
-		char* error_message = "Server is down!\n";
-		write(2, error_message, strlen(error_message));
-		exit(EXIT_FAILURE);
+		logger("Server does not respond!\n", 2);
+		return -1;
 	}
 	else if (message_length == 1 && buffer[0] == '0')
 	{
-		char* error_message = "File already exists!\n";
-		write(2, error_message, strlen(error_message));
+		logger("Server rejected the file!\n", 2);
 		return 0;
 	}
 
 	int read_length;
+	logger("Uploading...\n", 1);
+
 	while((read_length = read(file_fd, buffer, sizeof(buffer))) > 0)
 	{
 		if (send(server_fd, buffer, read_length, 0) != read_length)
 		{
-			char* error_message = "Write error!\n";
-			write(2, error_message, strlen(error_message));
-			return 0;
+			logger("Sending intrupted!\n", 2);
+			return -1;
 		}
 	}
 
 	if(read_length < 0)
 	{
-    	char* error_message = "Read error!\n";
-		write(2, error_message, strlen(error_message));
-		return 0;
+    	logger("Could not read whole file!\n", 2);
+			return -1;
 	}
 
 	char* message = "File is uploaded!\n";
-	write(2, message, strlen(message));
+	logger("File is uploaded!\n", 1);
 	return 1;
-}
-
-void send_broadcast(int udp_port, char* message)
-{
-	int broadcast_socket;
-	if ((broadcast_socket = socket(PF_INET, SOCK_DGRAM, 0)) < 0 )
-	{ 
-		perror("Socket creation failed!"); 
-		exit(EXIT_FAILURE);
-	}
-
-	int broadcast = 1;
-	setsockopt(broadcast_socket, SOL_SOCKET, SO_BROADCAST, &broadcast, sizeof(broadcast));
-
-	struct sockaddr_in broadcast_address;
-
-	broadcast_address.sin_family = PF_INET;
-	broadcast_address.sin_addr.s_addr = htonl(INADDR_BROADCAST); 
-	broadcast_address.sin_port = htons(udp_port);
-	char* beat_sound = "broad!\n";
-	write(1, beat_sound, strlen(beat_sound));
-	sendto(broadcast_socket, message, strlen(message), MSG_DONTWAIT, (const struct sockaddr *)&broadcast_address,
-			sizeof broadcast_address);
-	close(broadcast_socket);
 }
 
 void receive_broadcast(int broadcast_fd, const char* my_port)
@@ -435,10 +338,7 @@ void receive_broadcast(int broadcast_fd, const char* my_port)
 	char* file_name = response;
 
 	if ((received_data = recvfrom(broadcast_fd, response, 128, 0, NULL, NULL)) < 0)
-	{
-		char* error_message = "Broadcast receive failed!\n";
-		write(2, error_message, strlen(error_message));
-	}
+		logger("Could not receive clients' broadcast!\n", 2);
 	else if (received_data > 0)
 	{
 		response[received_data] = '\0';
@@ -461,6 +361,7 @@ void receive_broadcast(int broadcast_fd, const char* my_port)
 		if ((file_fd = open(file_name, O_RDONLY)) > 0)
 		{
 			close(file_fd);
+			logger("I have the file!\n", 1);
 
 			int new_connection = socket(PF_INET, SOCK_STREAM, 0);
 			struct sockaddr_in my_address, other_address;
@@ -478,18 +379,10 @@ void receive_broadcast(int broadcast_fd, const char* my_port)
 			setsockopt(new_connection, SOL_SOCKET, SO_REUSEPORT, &reuse, sizeof(reuse));
 
 			if (bind(new_connection, (struct sockaddr*)&my_address, address_length) < 0)
-			{
-				char* error_message = "Could not bind 1!\n";
-				write(1, error_message, strlen(error_message));
-				exit(EXIT_FAILURE);
-			}
+				die_with_error("Could not bind a socket for making new connection!\n");
 
 			if (connect(new_connection, (struct sockaddr*)&other_address, other_address_length) < 0)
-			{
-				char* error_message = "Could not connect to 123!\n";
-				write(1, error_message, strlen(error_message));
-				return;
-			}
+				die_with_error("Could not connect to client!\n");
 
 			fd_set read_fd;
 			FD_ZERO(&read_fd);
@@ -497,11 +390,17 @@ void receive_broadcast(int broadcast_fd, const char* my_port)
 			struct timeval timeout = {0, 1000};
 			select(new_connection + 1, &read_fd, NULL, NULL, &timeout);
 			char buffer[10];
-
-			if (FD_ISSET(new_connection, &read_fd))
+			int data_ready = 0;
+			if ((data_ready = FD_ISSET(new_connection, &read_fd)))
 				read(new_connection, buffer, 10);
-			else
+
+			if (!data_ready || strlen(buffer) != 1 || buffer[0] != '1')
+			{
+				logger("Someone else sent the file!\n", 1);
+				close(new_connection);
 				return;
+			}
+
 			send_file(new_connection, file_name);
 			close(new_connection);
 		}
@@ -511,97 +410,4 @@ void receive_broadcast(int broadcast_fd, const char* my_port)
 void signal_handler(int sig)
 {
 	can_send_broadcast = 1;
-}
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-int send_file(int destination_fd, char* file_name)
-{
-	char buffer[1024];
-	int file_fd;
-	if ((file_fd = open(file_name, O_RDONLY)) < 0)
-	{
-		char* error_message = "Open error!\n";
-		write(2, error_message, strlen(error_message));
-		return 0;
-	}
-
-	int read_length;
-	while((read_length = read(file_fd, buffer, sizeof(buffer))) > 0)
-	{
-		if (send(destination_fd, buffer, read_length, 0) != read_length)
-		{
-			char* error_message = "Write error!\n";
-			write(2, error_message, strlen(error_message));
-			return 0;
-		}
-	}
-
-	if(read_length < 0)
-	{
-    	char* error_message = "Read error!\n";
-		write(2, error_message, strlen(error_message));
-		return 0;
-	}
-
-	char* message = "File is sent!\n";
-	write(2, message, strlen(message));
-	return 1;
-}
-
-int receive_file(int source_fd, char* file_name)
-{
-	char buffer[128];
-	int file_fd;
-	if ((file_fd = open(file_name, O_RDWR | O_CREAT | O_TRUNC, S_IRWXU)) < 0)
-	{
-		char* error_message = "Create error!\n";
-		write(2, error_message, strlen(error_message));
-		return 0;
-	}
-
-	int read_length;
-	fd_set read_fd;
-	struct timeval timeout = {0, 100};
-	FD_ZERO(&read_fd);
-	FD_SET(source_fd, &read_fd);
-	select(source_fd + 1, &read_fd, NULL, NULL, &timeout);
-
-	while(FD_ISSET(source_fd, &read_fd) && (read_length = read(source_fd, buffer, sizeof(buffer))) > 0)
-	{
-		
-		struct timeval timeout = {0, 100};
-		FD_ZERO(&read_fd);
-		FD_SET(source_fd, &read_fd);
-		select(source_fd + 1, &read_fd, NULL, NULL, &timeout);
-
-		if (write(file_fd, buffer, read_length) != read_length)
-		{
-			char* error_message = "Write error!\n";
-			write(2, error_message, strlen(error_message));
-			return 0;
-		}
-	}
-
-	if(read_length < 0)
-	{
-    	char* error_message = "Read error!\n";
-		write(2, error_message, strlen(error_message));
-		return 0;
-	}
-
-	char* message = "New file is received!\n";
-	write(2, message, strlen(message));
-	return 1;
 }
