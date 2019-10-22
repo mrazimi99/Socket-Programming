@@ -387,8 +387,8 @@ void receive_broadcast(int broadcast_fd, const char* my_port)
 			char buffer[10];
 			struct timeval timeout = {1, 0};
 			setsockopt(new_connection, SOL_SOCKET, SO_RCVTIMEO, (const char*)&timeout, sizeof timeout);
-				int nbytes = read(new_connection, buffer, 10);
-				buffer[nbytes] = '\0';
+			int nbytes = read(new_connection, buffer, 10);
+			buffer[nbytes] = '\0';
 
 			if (strlen(buffer) != 1 || buffer[0] != '1')
 			{
